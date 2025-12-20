@@ -5,6 +5,8 @@ import { GlassCard } from "@/components/ui/status-card";
 import { cn } from "@/lib/utils";
 import { RouteImageUpload, RouteAnalysis } from "./RouteImageUpload";
 import { toast } from "sonner";
+import { analyzeTraffic } from "@/services/trafficApi";
+
 
 interface RouteInfo {
   id: string;
@@ -71,30 +73,80 @@ export const AmbulanceRouteOptimization = () => {
     setRouteInfo(info);
   }, [routes]);
 
-  const handleImageUpload = (routeId: string, file: File) => {
+  const handleImageUpload = async (routeId: string, file: File) => {
+    // Create preview image (UI only)
     const imageUrl = URL.createObjectURL(file);
-    
+  
+    // Set route to "analyzing" state
     setRoutes((prev) =>
       prev.map((route) =>
         route.routeId === routeId
-          ? { ...route, imageUrl, isAnalyzing: true, isAnalyzed: false, vehicleCount: null }
+          ? {
+              ...route,
+              imageUrl,
+              isAnalyzing: true,
+              isAnalyzed: false,
+              vehicleCount: null,
+            }
           : route
       )
     );
-
-    // Simulate AI analysis (random vehicle count between 5-80)
-    setTimeout(() => {
-      const vehicleCount = Math.floor(Math.random() * 75) + 5;
+  
+    try {
+      // 🔥 CALL REAL BACKEND API
+      const result = await analyzeTraffic(file);
+  
+      /**
+       * Backend returns delay_minutes:
+       * 0  -> LOW traffic
+       * 5  -> MEDIUM traffic
+       * 10 -> HIGH traffic
+       *
+       * UI expects vehicleCount, so we map it approximately
+       */
+      const vehicleCount =
+        result.delay_minutes === 0
+          ? 10
+          : result.delay_minutes === 5
+          ? 40
+          : 70;
+  
+      // Update route with real analysis result
       setRoutes((prev) =>
         prev.map((route) =>
           route.routeId === routeId
-            ? { ...route, isAnalyzing: false, isAnalyzed: true, vehicleCount }
+            ? {
+                ...route,
+                isAnalyzing: false,
+                isAnalyzed: true,
+                vehicleCount,
+              }
             : route
         )
       );
-      toast.success(`Route ${routeId.split("-")[1].toUpperCase()} analyzed: ${vehicleCount} vehicles detected`);
-    }, 2000);
+  
+      toast.success(
+        `Route ${routeId.split("-")[1].toUpperCase()} analyzed: ${result.traffic_level} traffic`
+      );
+    } catch (error) {
+      // Handle API failure gracefully
+      setRoutes((prev) =>
+        prev.map((route) =>
+          route.routeId === routeId
+            ? {
+                ...route,
+                isAnalyzing: false,
+                isAnalyzed: false,
+                vehicleCount: null,
+              }
+            : route
+        )
+      );
+  
+      toast.error("Traffic analysis failed. Please try again.");
+    }
   };
+  
 
   const handleRemoveImage = (routeId: string) => {
     setRoutes((prev) =>
