@@ -1,16 +1,50 @@
-const API_URL = "http://127.0.0.1:8000/analyze-traffic";
+const API_URL = "http://127.0.0.1:8000/analyze";
 
-export interface TrafficResult {
-  traffic_level: "LOW" | "MEDIUM" | "HIGH";
-  edge_density: number;
-  delay_minutes: number;
+/**
+ * Backend response contract (MATCHES FastAPI)
+ */
+export interface IntersectionResponse {
+  intersection_id: string;
+  mode: "NORMAL" | "EMERGENCY";
+  reason: string;
+  analysis: {
+    north: DirectionAnalysis;
+    south: DirectionAnalysis;
+    east: DirectionAnalysis;
+    west: DirectionAnalysis;
+  };
+  signal_plan: SignalPlan;
 }
 
-export async function analyzeTraffic(
-  file: File
-): Promise<TrafficResult> {
+export interface DirectionAnalysis {
+  traffic_level: "LOW" | "MEDIUM" | "HIGH";
+  edge_density: number;
+  ambulance_detected: boolean;
+  confidence: number | null;
+}
+
+export interface SignalPlan {
+  north: "GREEN" | "RED";
+  south: "GREEN" | "RED";
+  east: "GREEN" | "RED";
+  west: "GREEN" | "RED";
+}
+
+/**
+ * Analyze a full 4-way intersection
+ */
+export async function analyzeIntersection(images: {
+  north: File;
+  south: File;
+  east: File;
+  west: File;
+}): Promise<IntersectionResponse> {
   const formData = new FormData();
-  formData.append("file", file);
+
+  formData.append("north_image", images.north);
+  formData.append("south_image", images.south);
+  formData.append("east_image", images.east);
+  formData.append("west_image", images.west);
 
   const response = await fetch(API_URL, {
     method: "POST",
@@ -18,7 +52,7 @@ export async function analyzeTraffic(
   });
 
   if (!response.ok) {
-    throw new Error("Failed to analyze traffic");
+    throw new Error(await response.text());
   }
 
   return response.json();

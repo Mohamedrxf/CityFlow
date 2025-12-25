@@ -1,4 +1,19 @@
+# ===============================
+# Python
+# ===============================
+venv/
+.env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+
+# ===============================
 # Logs
+# ===============================
 logs
 *.log
 npm-debug.log*
@@ -7,15 +22,20 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# ===============================
+# Node / Frontend
+# ===============================
+node_modules/
+dist/
+dist-ssr/
 *.local
 
-# Editor directories and files
+# ===============================
+# Editor / OS
+# ===============================
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*
