@@ -215,7 +215,7 @@ export default function CityFlowDashboard() {
         prediction: <PredictionInsights />,
         simulation: <SimulationMode />,
         analytics: <AnalyticsDashboard />,
-        settings: <Settings />,
+        settings: <SettingsPage />,
     };
 
     const ambNode = getNode(ROUTE[step]);
