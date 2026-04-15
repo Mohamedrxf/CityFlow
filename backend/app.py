@@ -1,11 +1,16 @@
 from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+
+from typing import List
+
 from pydantic import BaseModel
+
 import os
 import shutil
 
 from traffic_classifier import classify_traffic
 from ambulance_detector import detect_ambulance
+from rule_based_detector import detect_ambulance as rule_detect
 from decision_engine import decide_mode
 from signal_controller import generate_signal_plan
 
@@ -25,6 +30,8 @@ app.add_middleware(
 
 UPLOAD_DIR = "temp_uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+connected_clients: List[WebSocket] = []
 
 
 # ─────────────────────────────────────────────────────────────
@@ -69,9 +76,32 @@ def save_file(file: UploadFile, suffix: str) -> str:
     return path
 
 
-# ─────────────────────────────────────────────────────────────
-# Existing Feature: Intersection Analysis
-# ─────────────────────────────────────────────────────────────
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    await ws.accept()
+    connected_clients.append(ws)
+    try:
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        connected_clients.remove(ws)
+
+
+async def broadcast(event: dict):
+    for client in connected_clients.copy():
+        try:
+            await client.send_json(event)
+        except:
+            connected_clients.remove(client)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "model": "loaded"}
+
+
+
 @app.post("/analyze")
 async def analyze(
     north_image: UploadFile = File(...),
@@ -95,6 +125,12 @@ async def analyze(
         traffic_level, edge_density = classify_traffic(path)
         detected, confidence = detect_ambulance(path)
 
+        if not detected and 0.4 < confidence < 0.7:
+            rule_result = rule_detect(path)
+            if rule_result["ambulance_detected"]:
+                detected = True
+                confidence = 0.65
+
         analysis[direction] = {
             "traffic_level": traffic_level,
             "edge_density": round(edge_density, 3),
@@ -112,7 +148,7 @@ async def analyze(
     # Signal plan
     signal_plan = generate_signal_plan(decision["mode"], ambulance_direction)
 
-    return {
+    result = {
         "intersection_id": "JNC_001",
         "mode": decision["mode"],
         "analysis": analysis,

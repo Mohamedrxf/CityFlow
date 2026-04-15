@@ -53,7 +53,9 @@ export const IntersectionDashboard = () => {
 
   return (
     <div className="space-y-6">
-      {result?.mode === "EMERGENCY" && <EmergencyBanner reason={result.reason} />}
+      {result?.mode === "EMERGENCY" && (
+        <EmergencyBanner reason={result.reason} />
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         {DIRECTIONS.map((dir) => (
