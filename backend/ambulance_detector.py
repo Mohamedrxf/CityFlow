@@ -3,8 +3,7 @@ import os
 
 MODEL_PATH = os.path.join(
     os.path.dirname(__file__),
-    "models",
-    "ambulance_yolov8.pt"
+    "yolov8n.pt"
 )
 
 model = YOLO(MODEL_PATH)
