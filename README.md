@@ -144,9 +144,9 @@ CityFlow/
 │   ├── anomaly_detector.py # Real-time anomaly detection
 │   ├── incident_logger.py  # Incident lifecycle management
 │   ├── report_generator.py # LLaMA3 AI report generation
-│   ├── models/             # YOLOv8 model files
-│   ├── outputs/            # Incident logs and reports
-│   ├── temp_uploads/       # Temporary image uploads
+│   ├── models/             # YOLOv8 model files (place .pt files here)
+│   ├── outputs/            # Incident logs and reports (generated)
+│   ├── temp_uploads/       # Temporary image uploads (generated)
 │   └── requirements.txt   # Python dependencies
 ├── src/                    # React frontend
 │   ├── pages/             # Dashboard pages
