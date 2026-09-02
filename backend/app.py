@@ -156,6 +156,8 @@ async def analyze(
         "reason": decision["reason"]
     }
 
+    return result
+
 
 # ─────────────────────────────────────────────────────────────
 # New Feature 1: Predictive Pre-clearing
@@ -224,7 +226,9 @@ async def end_incident(incident_id: str):
 @app.post("/generate-report/{incident_id}")
 async def generate_report(incident_id: str):
     incidents = load_incidents()
-    incident = next((i for i in incidents if i["incident_id"] == incident_id), None)
+    matching = [i for i in incidents if i["incident_id"] == incident_id]
+    # Prefer the most recent record for this incident_id (handles legacy duplicates)
+    incident = matching[-1] if matching else None
 
     if not incident:
         return {"error": "Incident not found"}

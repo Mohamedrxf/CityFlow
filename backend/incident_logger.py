@@ -17,7 +17,13 @@ def load_incidents() -> list:
 
 def save_incident(incident: dict):
     incidents = load_incidents()
-    incidents.append(incident)
+    # Update the existing record for this incident_id if present, otherwise append
+    for i, existing in enumerate(incidents):
+        if existing.get("incident_id") == incident.get("incident_id"):
+            incidents[i] = incident
+            break
+    else:
+        incidents.append(incident)
     os.makedirs("outputs", exist_ok=True)
     with open(INCIDENTS_FILE, "w") as f:
         json.dump(incidents, f, indent=2)
@@ -25,7 +31,7 @@ def save_incident(incident: dict):
 
 def create_incident(ambulance_id: str, destination: str) -> dict:
     """Call this when an ambulance emergency starts"""
-    return {
+    incident = {
         "incident_id": f"INC_{int(time.time())}",
         "ambulance_id": ambulance_id,
         "destination": destination,
@@ -37,6 +43,8 @@ def create_incident(ambulance_id: str, destination: str) -> dict:
         "total_time_mins": None,
         "status": "ACTIVE"
     }
+    save_incident(incident)
+    return incident
 
 
 def close_incident(incident: dict) -> dict:
