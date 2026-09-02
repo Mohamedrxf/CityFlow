@@ -43,7 +43,17 @@ dist-ssr/
 *.sln
 *.sw?
 
+
+# ===============================
+# Project-specific
+# ===============================
+friday-tony-stark-demo/
+backend/outputs/
+backend/temp_uploads/
+backend/models/*.pt
+=======
 __pycache__/
 *.pyc
 outputs/
 *.pt
+
