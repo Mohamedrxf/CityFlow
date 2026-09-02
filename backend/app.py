@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from typing import List
@@ -6,7 +6,6 @@ from typing import List
 from pydantic import BaseModel
 
 import os
-import shutil
 
 from traffic_classifier import classify_traffic
 from ambulance_detector import detect_ambulance
@@ -28,8 +27,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = "temp_uploads"
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "temp_uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Upload safety limits (image analysis use case)
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB per image
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+def _validate_upload(file: UploadFile) -> str:
+    """Return a safe basename for the upload; reject anything unsafe/unsupported."""
+    name = os.path.basename(file.filename or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Missing or invalid filename")
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Unsupported file type")
+    return name
+
+
+def save_file(file: UploadFile, suffix: str) -> str:
+    name = _validate_upload(file)
+    path = os.path.join(UPLOAD_DIR, f"{suffix}_{name}")
+    size = 0
+    try:
+        with open(path, "wb") as buffer:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Uploaded file too large")
+                buffer.write(chunk)
+    except HTTPException:
+        if os.path.exists(path):
+            os.remove(path)
+        raise
+    return path
 
 connected_clients: List[WebSocket] = []
 
@@ -69,13 +104,6 @@ active_incidents: dict[str, dict] = {}
 # ─────────────────────────────────────────────────────────────
 # Utility
 # ─────────────────────────────────────────────────────────────
-def save_file(file: UploadFile, suffix: str) -> str:
-    path = os.path.join(UPLOAD_DIR, f"{suffix}_{file.filename}")
-    with open(path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    return path
-
-
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
@@ -109,54 +137,65 @@ async def analyze(
     east_image: UploadFile = File(...),
     west_image: UploadFile = File(...)
 ):
-    images = {
-        "north": save_file(north_image, "north"),
-        "south": save_file(south_image, "south"),
-        "east": save_file(east_image, "east"),
-        "west": save_file(west_image, "west")
-    }
+    saved_paths: list[str] = []
+    try:
+        images = {
+            "north": save_file(north_image, "north"),
+            "south": save_file(south_image, "south"),
+            "east": save_file(east_image, "east"),
+            "west": save_file(west_image, "west")
+        }
+        saved_paths = list(images.values())
 
-    analysis = {}
-    ambulance_direction = None
-    ambulance_confidence = 0.0
+        analysis = {}
+        ambulance_direction = None
+        ambulance_confidence = 0.0
 
-    # Per-direction analysis
-    for direction, path in images.items():
-        traffic_level, edge_density = classify_traffic(path)
-        detected, confidence = detect_ambulance(path)
+        # Per-direction analysis
+        for direction, path in images.items():
+            traffic_level, edge_density = classify_traffic(path)
+            detected, confidence = detect_ambulance(path)
 
-        if not detected and 0.4 < confidence < 0.7:
-            rule_result = rule_detect(path)
-            if rule_result["ambulance_detected"]:
-                detected = True
-                confidence = 0.65
+            if not detected and 0.4 < confidence < 0.7:
+                rule_result = rule_detect(path)
+                if rule_result["ambulance_detected"]:
+                    detected = True
+                    confidence = 0.65
 
-        analysis[direction] = {
-            "traffic_level": traffic_level,
-            "edge_density": round(edge_density, 3),
-            "ambulance_detected": detected,
-            "confidence": round(confidence, 2) if detected else None
+            analysis[direction] = {
+                "traffic_level": traffic_level,
+                "edge_density": round(edge_density, 3),
+                "ambulance_detected": detected,
+                "confidence": round(confidence, 2) if detected else None
+            }
+
+            if detected and confidence > ambulance_confidence:
+                ambulance_direction = direction
+                ambulance_confidence = confidence
+
+        # Decision engine
+        decision = decide_mode(ambulance_direction)
+
+        # Signal plan
+        signal_plan = generate_signal_plan(decision["mode"], ambulance_direction)
+
+        result = {
+            "intersection_id": "JNC_001",
+            "mode": decision["mode"],
+            "analysis": analysis,
+            "signal_plan": signal_plan,
+            "reason": decision["reason"]
         }
 
-        if detected and confidence > ambulance_confidence:
-            ambulance_direction = direction
-            ambulance_confidence = confidence
-
-    # Decision engine
-    decision = decide_mode(ambulance_direction)
-
-    # Signal plan
-    signal_plan = generate_signal_plan(decision["mode"], ambulance_direction)
-
-    result = {
-        "intersection_id": "JNC_001",
-        "mode": decision["mode"],
-        "analysis": analysis,
-        "signal_plan": signal_plan,
-        "reason": decision["reason"]
-    }
-
-    return result
+        return result
+    finally:
+        # Remove only the temporary files created by this request
+        for p in saved_paths:
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except OSError:
+                pass
 
 
 # ─────────────────────────────────────────────────────────────
