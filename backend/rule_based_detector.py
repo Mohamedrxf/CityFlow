@@ -5,7 +5,7 @@ import os
 import time
 
 # Load YOLO pretrained model (vehicle proposals only)
-model = YOLO("yolov8n.pt")
+model = YOLO(os.path.join(os.path.dirname(__file__), "yolov8n.pt"))
 
 # -------------------------------
 # IOU for NMS

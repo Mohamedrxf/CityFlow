@@ -5,7 +5,8 @@ import time
 from datetime import datetime
 
 
-INCIDENTS_FILE = "outputs/incidents.json"
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+INCIDENTS_FILE = os.path.join(_BACKEND_DIR, "outputs", "incidents.json")
 
 
 def load_incidents() -> list:
@@ -24,7 +25,7 @@ def save_incident(incident: dict):
             break
     else:
         incidents.append(incident)
-    os.makedirs("outputs", exist_ok=True)
+    os.makedirs(os.path.dirname(INCIDENTS_FILE), exist_ok=True)
     with open(INCIDENTS_FILE, "w") as f:
         json.dump(incidents, f, indent=2)
 
