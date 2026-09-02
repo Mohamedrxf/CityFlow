@@ -1,16 +1,53 @@
-export async function analyzeImage(file: File) {
-    const formData = new FormData();
-    formData.append("file", file);
-  
-    const response = await fetch("http://127.0.0.1:8000/analyze", {
+// services/analyzeApi.ts
+
+export interface DirectionAnalysis {
+  traffic_level: string;
+  edge_density: number;
+  ambulance_detected: boolean;
+  confidence: number | null;
+}
+
+export interface AnalyzeResponse {
+  intersection_id: string;
+  mode: string;
+  analysis: {
+    north: DirectionAnalysis;
+    south: DirectionAnalysis;
+    east: DirectionAnalysis;
+    west: DirectionAnalysis;
+  };
+  signal_plan: any;
+  reason: string;
+}
+
+const BASE_URL = "http://127.0.0.1:8000";
+
+export async function analyzeIntersection(
+  north: File,
+  south: File,
+  east: File,
+  west: File,
+): Promise<AnalyzeResponse> {
+  const formData = new FormData();
+  formData.append("north_image", north);
+  formData.append("south_image", south);
+  formData.append("east_image", east);
+  formData.append("west_image", west);
+
+  try {
+    const response = await fetch(`${BASE_URL}/analyze`, {
       method: "POST",
       body: formData,
     });
-  
+
     if (!response.ok) {
-      throw new Error("Backend analysis failed");
+      const err = await response.text();
+      throw new Error(`Backend error: ${response.status} - ${err}`);
     }
-  
-    return response.json();
+
+    return await response.json();
+  } catch (error) {
+    console.error("❌ Analyze failed:", error);
+    throw error;
   }
-  
+}
