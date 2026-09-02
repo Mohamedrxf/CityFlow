@@ -17,7 +17,13 @@ def load_incidents() -> list:
 
 def save_incident(incident: dict):
     incidents = load_incidents()
-    incidents.append(incident)
+    # Update the existing record for this incident_id if present, otherwise append
+    for i, existing in enumerate(incidents):
+        if existing.get("incident_id") == incident.get("incident_id"):
+            incidents[i] = incident
+            break
+    else:
+        incidents.append(incident)
     os.makedirs("outputs", exist_ok=True)
     with open(INCIDENTS_FILE, "w") as f:
         json.dump(incidents, f, indent=2)
