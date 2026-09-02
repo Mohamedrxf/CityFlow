@@ -156,6 +156,8 @@ async def analyze(
         "reason": decision["reason"]
     }
 
+    return result
+
 
 # ─────────────────────────────────────────────────────────────
 # New Feature 1: Predictive Pre-clearing

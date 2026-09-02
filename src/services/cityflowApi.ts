@@ -14,7 +14,9 @@ export interface AnalyzeResponse {
     reason: string;
 }
 
-const API_BASE = "http://localhost:8000";
+import { BACKEND_BASE_URL } from "@/lib/apiConfig";
+
+const API_BASE = BACKEND_BASE_URL;
 
 export async function analyzeIntersection(files: {
     north: File;

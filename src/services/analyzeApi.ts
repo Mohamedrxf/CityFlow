@@ -20,7 +20,9 @@ export interface AnalyzeResponse {
   reason: string;
 }
 
-const BASE_URL = "http://127.0.0.1:8000";
+import { BACKEND_BASE_URL } from "@/lib/apiConfig";
+
+const BASE_URL = BACKEND_BASE_URL;
 
 export async function analyzeIntersection(
   north: File,

@@ -25,7 +25,7 @@ def save_incident(incident: dict):
 
 def create_incident(ambulance_id: str, destination: str) -> dict:
     """Call this when an ambulance emergency starts"""
-    return {
+    incident = {
         "incident_id": f"INC_{int(time.time())}",
         "ambulance_id": ambulance_id,
         "destination": destination,
@@ -37,6 +37,8 @@ def create_incident(ambulance_id: str, destination: str) -> dict:
         "total_time_mins": None,
         "status": "ACTIVE"
     }
+    save_incident(incident)
+    return incident
 
 
 def close_incident(incident: dict) -> dict:
