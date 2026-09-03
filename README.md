@@ -450,32 +450,191 @@ Retrieves all logged incidents.
 
 ## Environment Variables
 
-Currently, the system uses hardcoded configuration. Recommended environment variables for production:
+The following environment variables are currently supported:
 
-```env
-# Backend
-BACKEND_HOST=0.0.0.0
-BACKEND_PORT=8000
-CORS_ORIGINS=http://localhost:5173
+### Backend Configuration
 
-# AI/ML
-OLLAMA_MODEL=llama3:8b
-OLLAMA_HOST=http://localhost:11434
+| Variable | Purpose | Default | Example |
+|----------|---------|---------|---------|
+| `CITYFLOW_CORS_ORIGIN` | Allowed CORS origin for frontend communication | `http://localhost:8080` | `http://localhost:3000` |
+| `CITYFLOW_OLLAMA_MODEL` | Ollama model used for incident report generation | `llama3:8b` | `llama3.1:8b` |
 
-# File Storage
-UPLOAD_DIR=temp_uploads
-OUTPUT_DIR=outputs
-MODEL_DIR=models
+### Frontend Configuration
 
-# Detection Thresholds
-AMBULANCE_CONFIDENCE_THRESHOLD=0.7
-PRE_CLEAR_BUFFER_SECONDS=8
-AVERAGE_AMBULANCE_SPEED_MPS=11
+The frontend backend URL is centralized in `src/lib/apiConfig.ts`:
 
-# Anomaly Detection
-STUCK_THRESHOLD_SECONDS=45
-SPEED_CRITICAL_THRESHOLD_KMH=5
+```typescript
+export const BACKEND_BASE_URL = "http://localhost:8000";
 ```
+
+---
+
+## API Reference
+
+### REST Endpoints
+
+#### `GET /health`
+Health check endpoint.
+- **Response**: `{"status": "ok", "model": "loaded"}`
+
+#### `POST /analyze`
+Analyze traffic intersection images from 4 directions.
+- **Request**: Multipart form data with `north_image`, `south_image`, `east_image`, `west_image`
+- **Response**: Traffic analysis per direction, signal plan, and mode decision
+- **Errors**: `415` for unsupported file types, `413` for files exceeding 10 MB
+
+#### `POST /predict-path`
+Predict ambulance route and ETA.
+- **Request**: `{"current_intersection": "INT_01", "destination": "HOSPITAL_A", "speed_mps": 11.0}`
+- **Response**: `{"path": [...], "eta_seconds": [...], "pre_clear_schedule": [...], "total_eta_seconds": 140.0}`
+- **Errors**: `400` for unknown intersection nodes
+
+#### `GET /api/driver/live`
+Get current driver live-state based on active incidents.
+- **Response (active)**: `{"incident_id": "...", "ambulance_id": "AMB-01", "hospital_name": "HOSPITAL_A", "eta_seconds": 140.0, "distance_km": 1.54, "corridor_active": true, "emergency_mode": true, "incident_status": "ACTIVE", "advisory": "..."}`
+- **Response (idle)**: `{"corridor_active": false, "emergency_mode": false, "incident_status": "IDLE", "advisory": "No active incident. Standing by."}`
+
+#### `POST /start-incident`
+Start a new emergency incident.
+- **Request**: `{"ambulance_id": "AMB-01", "destination": "HOSPITAL_A"}`
+- **Response**: Incident object with status `ACTIVE`
+
+#### `GET /incidents`
+List all incidents.
+- **Response**: JSON array of incident objects
+
+#### `POST /close-incident/{incident_id}`
+Close an active incident.
+- **Response**: Updated incident with status `COMPLETED`
+- **Errors**: `{"error": "Incident not found"}` for unknown IDs
+
+#### `POST /generate-report/{incident_id}`
+Generate AI incident report (requires Ollama).
+- **Response**: `{"incident_id": "...", "report": "..."}`
+- **Errors**: `{"error": "Incident not found"}` for unknown IDs
+
+### WebSocket Endpoints
+
+#### `WS /ws`
+General-purpose broadcast WebSocket. Echoes JSON messages to all connected clients.
+
+#### `WS /telemetry/{ambulance_id}`
+Real-time ambulance telemetry anomaly detection.
+- **Request**: `{"position": "INT_01", "speed": 10.0, "signal_state": "GREEN"}`
+- **Response**: `{"ambulance_id": "AMB-01", "anomalies": [...], "anomaly_count": 0}`
+
+---
+
+## Telemetry Input Validation
+
+The telemetry WebSocket implements input validation to prevent malformed data from being interpreted as legitimate operational telemetry:
+
+| Input | Behavior |
+|-------|----------|
+| Valid numeric speed | Anomaly detector receives telemetry normally |
+| Genuine speed=0.0 | Treated as legitimate stationary ambulance telemetry |
+| Missing speed | Anomaly evaluation skipped — does NOT become 0.0 |
+| Null speed | Anomaly evaluation skipped — does NOT become 0.0 |
+| Non-numeric speed | Anomaly evaluation skipped — does NOT become 0.0 |
+| Malformed JSON | Does not crash the WebSocket |
+
+This is input validation behavior, NOT real-world ambulance telemetry integration. Real vehicle telemetry hardware is not implemented.
+
+---
+
+## Driver Dashboard Data Availability
+
+The DriverDashboard uses a combination of backend-authoritative data and frontend-demo state:
+
+### Backend-Authoritative / Computed
+- `ambulance_id` — from active incident
+- `hospital_name` — from incident destination
+- `eta_seconds` — computed via path predictor
+- `distance_km` — computed via city graph
+- `corridor_active` — derived from active incident state
+- `emergency_mode` — derived from active incident state
+- `advisory` — computed from corridor and ETA
+- `incident_status` — from incident state
+
+### Not Currently Available from Backend
+The following fields currently use frontend/demo defaults:
+- Route progress
+- Fuel percentage
+- Driver profile
+- Patient priority
+- GPS status
+- Network status
+- Control link status
+- AI suggestions
+- Incident messages
+
+---
+
+## LLM Dependency
+
+Report generation depends on an available Ollama runtime.
+
+- **Model**: `llama3:8b` (configurable via `CITYFLOW_OLLAMA_MODEL`)
+
+---
+
+## Testing
+
+### Backend Regression Suite
+```
+venv\Scripts\python.exe -m unittest test_api -v
+```
+**Current verified count**: 20 tests PASS
+
+Coverage areas:
+- Health check
+- CORS configuration
+- Image analysis (valid, unsupported, traversal, oversized)
+- Path prediction (valid route, unknown nodes)
+- Incident lifecycle (create, list, close, report)
+- Driver live state (idle)
+- Telemetry WebSocket (malformed input, type validation, sequential messages, anomaly semantics)
+
+### Frontend Build
+```
+npm run build
+```
+**Status**: PASS
+
+---
+
+## Current Limitations
+
+- No authentication
+- No database (file-based incident storage)
+- Report generation depends on Ollama availability
+- Real vehicle telemetry integration is not implemented
+- Some DriverDashboard fields remain frontend/demo state
+- No real camera integration (image upload only)
+
+---
+
+## Security Baseline
+
+- CORS is configurable via `CITYFLOW_CORS_ORIGIN`
+- Default local CORS origin is `localhost:8080`
+- Upload validation restricts file types and size (10 MB limit)
+- Allowed image extensions: `.jpg`, `.jpeg`, `.png`, `.webp`
+- Filesystem paths are cwd-independent
+- No authentication currently exists
+
+---
+
+## Verification Status
+
+| Component | Status |
+|-----------|--------|
+| Backend regression suite (20 tests) | PASS |
+| Frontend build | PASS |
+| API contract | PASS |
+| Telemetry validation | PASS |
+| Incident persistence | PASS |
+| Driver live API | PASS |
 
 ---
 
