@@ -61,6 +61,7 @@ type BackendPayload = {
     aiSuggestion?: string;
     advisory?: string;
     signals?: SignalItem[];
+    timestamp?: string;
 };
 
 const initialSignals: SignalItem[] = [
@@ -142,6 +143,10 @@ export default function DriverDashboard() {
     const [ackReceived, setAckReceived] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [backendOnline, setBackendOnline] = useState(false);
+    const [backendTimestamp, setBackendTimestamp] = useState<string | null>(null);
+    const [incidentId, setIncidentId] = useState<string | null>(null);
+    const [incidentLoading, setIncidentLoading] = useState(false);
+    const [incidentError, setIncidentError] = useState<string | null>(null);
     const [ambulancePosition, setAmbulancePosition] = useState({ x: 90, y: 350, angle: 0 });
 
     const etaText = useMemo(() => {
@@ -163,11 +168,6 @@ export default function DriverDashboard() {
     useEffect(() => {
         const countdownTimer = setInterval(() => {
             setEtaSecondsTotal((prev) => (prev > 0 ? prev - 1 : 0));
-
-            setRouteProgress((prev) => {
-                if (!emergencyMode) return prev;
-                return prev < 98 ? prev + 0.18 : prev;
-            });
 
             setSignals((prev) =>
                 prev.map((signal, index) => {
@@ -253,6 +253,7 @@ export default function DriverDashboard() {
                     if (payload.aiSuggestion) setAiSuggestion(payload.aiSuggestion);
                     if (payload.advisory) setAdvisory(payload.advisory);
                     if (payload.signals?.length) setSignals(payload.signals);
+                    if (payload.timestamp) setBackendTimestamp(payload.timestamp);
                 } else {
                     setBackendOnline(false);
                 }
@@ -355,20 +356,61 @@ export default function DriverDashboard() {
         ]);
     };
 
-    const handleStartEmergency = () => {
-        setEmergencyMode(true);
-        setCorridorActive(true);
-        setTimeline((prev) => [
-            {
-                time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                title: "Emergency mode activated",
-                desc: "Driver console switched to high-priority response state",
-            },
-            ...prev,
-        ]);
+    const handleStartEmergency = async () => {
+        setIncidentLoading(true);
+        setIncidentError(null);
+        try {
+            const res = await fetch(`${BACKEND_BASE_URL}/start-incident`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ambulance_id: ambulanceId,
+                    destination: hospitalName,
+                }),
+            });
+            if (!res.ok) {
+                setIncidentError("Failed to start incident");
+                return;
+            }
+            const incident = await res.json();
+            setIncidentId(incident.incident_id);
+            setEmergencyMode(true);
+            setCorridorActive(true);
+            setTimeline((prev) => [
+                {
+                    time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                    title: "Emergency mode activated",
+                    desc: `Incident ${incident.incident_id} started`,
+                },
+                ...prev,
+            ]);
+        } catch {
+            setIncidentError("Network error starting incident");
+        } finally {
+            setIncidentLoading(false);
+        }
     };
 
-    const handleEndTrip = () => {
+    const handleEndTrip = async () => {
+        if (incidentId) {
+            setIncidentLoading(true);
+            setIncidentError(null);
+            try {
+                const res = await fetch(`${BACKEND_BASE_URL}/close-incident/${incidentId}`, {
+                    method: "POST",
+                });
+                if (!res.ok) {
+                    setIncidentError("Failed to close incident");
+                    return;
+                }
+                setIncidentId(null);
+            } catch {
+                setIncidentError("Network error closing incident");
+                return;
+            } finally {
+                setIncidentLoading(false);
+            }
+        }
         setEmergencyMode(false);
         setCorridorActive(false);
         setTimeline((prev) => [
@@ -623,6 +665,12 @@ export default function DriverDashboard() {
                                 <div className="absolute bottom-4 right-4 w-64 rounded-2xl border border-white/10 bg-black/40 p-4 backdrop-blur-md">
                                     <div className="mb-2 flex items-center justify-between text-sm">
                                         <span className="text-gray-300">Corridor Progress</span>
+                                        <span className="rounded-full bg-yellow-500/15 px-2 py-0.5 text-xs font-medium text-yellow-300">
+                                            Demo
+                                        </span>
+                                    </div>
+                                    <div className="mb-1 flex items-center justify-between text-sm">
+                                        <span className="text-xs text-gray-500">Simulated telemetry</span>
                                         <span className="font-semibold text-emerald-300">
                                             {Math.round(routeProgress)}%
                                         </span>
@@ -863,9 +911,10 @@ export default function DriverDashboard() {
                         <div className="grid grid-cols-1 gap-4">
                             <button
                                 onClick={handleStartEmergency}
-                                className="rounded-2xl bg-red-600 px-5 py-4 text-base font-bold shadow-lg shadow-red-600/20 transition hover:scale-[1.01]"
+                                disabled={incidentLoading}
+                                className="rounded-2xl bg-red-600 px-5 py-4 text-base font-bold shadow-lg shadow-red-600/20 transition hover:scale-[1.01] disabled:opacity-50"
                             >
-                                Start Emergency Mode
+                                {incidentLoading ? "Starting..." : "Start Emergency Mode"}
                             </button>
 
                             <button
@@ -877,9 +926,10 @@ export default function DriverDashboard() {
 
                             <button
                                 onClick={handleEndTrip}
-                                className="rounded-2xl border border-white/10 bg-white/10 px-5 py-4 text-base font-bold transition hover:bg-white/15"
+                                disabled={incidentLoading}
+                                className="rounded-2xl border border-white/10 bg-white/10 px-5 py-4 text-base font-bold transition hover:bg-white/15 disabled:opacity-50"
                             >
-                                End Trip
+                                {incidentLoading ? "Ending..." : "End Trip"}
                             </button>
 
                             <button
@@ -889,6 +939,12 @@ export default function DriverDashboard() {
                                 Contact Hospital
                             </button>
                         </div>
+
+                        {incidentError && (
+                            <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                                {incidentError}
+                            </div>
+                        )}
 
                         <div className="mt-5 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-4">
                             <div className="flex items-start gap-3">
@@ -1010,6 +1066,11 @@ export default function DriverDashboard() {
                                     Ambulance telemetry, hospital coordination, and signal network are{" "}
                                     {backendOnline ? "functioning normally with live backend sync." : "running in demo mode with local simulation."}
                                 </p>
+                                {backendTimestamp && (
+                                    <p className="mt-2 text-xs text-cyan-100/60">
+                                        Last update: {new Date(backendTimestamp).toLocaleTimeString()}
+                                    </p>
+                                )}
                             </div>
                         </div>
                     </motion.div>

@@ -4,6 +4,8 @@ import {
     Activity,
     Cpu,
     Shield,
+    FileText,
+    Loader2,
 } from "lucide-react";
 
 import {
@@ -13,6 +15,24 @@ import {
     Tooltip,
     ResponsiveContainer,
 } from "recharts";
+
+import { BACKEND_BASE_URL } from "@/lib/apiConfig";
+
+// ─────────────────────────────────────────────
+// INCIDENT DATA MODEL (matches backend/app.py)
+// ─────────────────────────────────────────────
+interface IncidentRecord {
+    incident_id: string;
+    ambulance_id: string;
+    destination: string;
+    start_time: string;
+    end_time: string | null;
+    route_taken: string[];
+    signals_overridden: number;
+    anomalies_detected: string[];
+    total_time_mins: number | null;
+    status: string;
+}
 
 // ─────────────────────────────────────────────
 // 🔥 AI PRIORITY FUNCTION
@@ -39,6 +59,13 @@ const EmergencyPriority = () => {
     const [ambulances, setAmbulances] = useState<any[]>([]);
     const [chartData, setChartData] = useState<any[]>([]);
     const [autoOverride, setAutoOverride] = useState(true);
+    const [incidents, setIncidents] = useState<IncidentRecord[]>([]);
+    const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
+    const [incidentsLoading, setIncidentsLoading] = useState(false);
+    const [incidentsError, setIncidentsError] = useState<string | null>(null);
+    const [reportLoadingId, setReportLoadingId] = useState<string | null>(null);
+    const [reportError, setReportError] = useState<string | null>(null);
+    const [generatedReport, setGeneratedReport] = useState<{ incident_id: string; report: string } | null>(null);
 
     // ─────────────────────────────────────────
     // 🔄 REAL-TIME SIMULATION
@@ -79,6 +106,60 @@ const EmergencyPriority = () => {
 
         return () => clearInterval(interval);
     }, []);
+
+    // ─────────────────────────────────────────
+    // LOAD INCIDENT HISTORY
+    // ─────────────────────────────────────────
+    useEffect(() => {
+        let alive = true;
+        const loadIncidents = async () => {
+            setIncidentsLoading(true);
+            setIncidentsError(null);
+            try {
+                const res = await fetch(`${BACKEND_BASE_URL}/incidents`);
+                if (!alive) return;
+                if (!res.ok) {
+                    setIncidentsError("Failed to load incidents");
+                    return;
+                }
+                const data: IncidentRecord[] = await res.json();
+                if (!alive) return;
+                setIncidents(data);
+            } catch {
+                if (alive) setIncidentsError("Network error loading incidents");
+            } finally {
+                if (alive) setIncidentsLoading(false);
+            }
+        };
+        loadIncidents();
+        return () => { alive = false; };
+    }, []);
+
+    // ─────────────────────────────────────────
+    // GENERATE REPORT
+    // ─────────────────────────────────────────
+    const handleGenerateReport = async (incidentId: string) => {
+        if (reportLoadingId) return;
+        setReportLoadingId(incidentId);
+        setReportError(null);
+        setGeneratedReport(null);
+        setSelectedIncidentId(incidentId);
+        try {
+            const res = await fetch(`${BACKEND_BASE_URL}/generate-report/${incidentId}`, {
+                method: "POST",
+            });
+            if (!res.ok) {
+                setReportError("Failed to generate report");
+                return;
+            }
+            const data = await res.json();
+            setGeneratedReport({ incident_id: data.incident_id, report: data.report });
+        } catch {
+            setReportError("Network error generating report");
+        } finally {
+            setReportLoadingId(null);
+        }
+    };
 
     return (
         <div className="p-6 text-white min-h-screen bg-gradient-to-br from-[#050A14] to-[#0B1522] space-y-6">
@@ -180,6 +261,131 @@ const EmergencyPriority = () => {
                         />
                     </LineChart>
                 </ResponsiveContainer>
+            </div>
+
+            {/* INCIDENT HISTORY */}
+            <div className="bg-black/40 border border-gray-800 rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                        <Shield size={16} className="text-cyan-400" />
+                        <h2 className="text-sm text-gray-400">
+                            INCIDENT HISTORY
+                        </h2>
+                    </div>
+                    <span className="text-xs text-gray-500">
+                        {incidents.length} record{incidents.length !== 1 ? "s" : ""}
+                    </span>
+                </div>
+
+                {incidentsLoading ? (
+                    <div className="flex items-center justify-center gap-3 rounded-xl border border-gray-800 bg-black/20 px-6 py-10">
+                        <Loader2 size={20} className="animate-spin text-cyan-400" />
+                        <p className="text-sm text-gray-400">Loading incidents...</p>
+                    </div>
+                ) : incidentsError ? (
+                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-6 py-10 text-center">
+                        <p className="text-sm text-red-300">{incidentsError}</p>
+                    </div>
+                ) : incidents.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-gray-700 bg-black/20 px-6 py-10 text-center">
+                        <FileText size={28} className="mx-auto mb-3 text-gray-600" />
+                        <p className="text-sm text-gray-400">
+                            No incidents loaded yet.
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                            Incident records will appear here when connected to the backend.
+                        </p>
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                            <thead>
+                                <tr className="border-b border-gray-800 text-gray-500">
+                                    <th className="pb-2 pr-4 font-medium">Incident ID</th>
+                                    <th className="pb-2 pr-4 font-medium">Ambulance</th>
+                                    <th className="pb-2 pr-4 font-medium">Destination</th>
+                                    <th className="pb-2 pr-4 font-medium">Status</th>
+                                    <th className="pb-2 pr-4 font-medium">Start Time</th>
+                                    <th className="pb-2 pr-4 font-medium">End Time</th>
+                                    <th className="pb-2 pr-4 font-medium">Duration (min)</th>
+                                    <th className="pb-2 font-medium">Report</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {incidents.map((inc) => (
+                                    <tr
+                                        key={inc.incident_id}
+                                        className={selectedIncidentId === inc.incident_id ? "bg-cyan-500/10" : ""}
+                                    >
+                                        <td className="py-2 pr-4 font-mono text-cyan-300">
+                                            {inc.incident_id}
+                                        </td>
+                                        <td className="py-2 pr-4">{inc.ambulance_id}</td>
+                                        <td className="py-2 pr-4">{inc.destination}</td>
+                                        <td className="py-2 pr-4">
+                                            <span
+                                                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                                    inc.status === "COMPLETED"
+                                                        ? "bg-green-500/15 text-green-300"
+                                                        : inc.status === "ACTIVE"
+                                                        ? "bg-yellow-500/15 text-yellow-300"
+                                                        : "bg-gray-500/15 text-gray-300"
+                                                }`}
+                                            >
+                                                {inc.status}
+                                            </span>
+                                        </td>
+                                        <td className="py-2 pr-4 text-gray-400">
+                                            {inc.start_time ? new Date(inc.start_time).toLocaleString() : "—"}
+                                        </td>
+                                        <td className="py-2 pr-4 text-gray-400">
+                                            {inc.end_time ? new Date(inc.end_time).toLocaleString() : "—"}
+                                        </td>
+                                        <td className="py-2 pr-4">
+                                            {inc.total_time_mins !== null ? inc.total_time_mins : "—"}
+                                        </td>
+                                        <td className="py-2">
+                                            <button
+                                                onClick={() => handleGenerateReport(inc.incident_id)}
+                                                disabled={reportLoadingId !== null}
+                                                className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-300 transition hover:bg-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {reportLoadingId === inc.incident_id ? (
+                                                    <span className="flex items-center gap-1">
+                                                        <Loader2 size={12} className="animate-spin" />
+                                                        Generating
+                                                    </span>
+                                                ) : (
+                                                    "Generate Report"
+                                                )}
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+
+                {reportError && (
+                    <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">
+                        {reportError}
+                    </div>
+                )}
+
+                {generatedReport && (
+                    <div className="mt-4 rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-5">
+                        <div className="mb-3 flex items-center gap-2">
+                            <FileText size={16} className="text-cyan-400" />
+                            <h3 className="text-sm font-semibold text-cyan-300">
+                                Incident Report — {generatedReport.incident_id}
+                            </h3>
+                        </div>
+                        <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-gray-300">
+                            {generatedReport.report}
+                        </pre>
+                    </div>
+                )}
             </div>
 
             {/* FOOTER */}
