@@ -16,6 +16,14 @@ import {
     Tooltip,
     ResponsiveContainer
 } from "recharts";
+import { BACKEND_BASE_URL } from "@/lib/apiConfig";
+
+// Authoritative graph nodes from backend city_graph.py
+const GRAPH_NODES = [
+    "INT_01", "INT_02", "INT_03", "INT_04",
+    "INT_05", "INT_06", "INT_07", "INT_08",
+    "HOSPITAL_A", "HOSPITAL_B",
+];
 
 const baseRoute = ["D1", "C1", "B1", "B2", "B3", "B4", "C4", "D4"];
 const altRoute = ["D1", "C1", "C2", "C3", "C4", "D4"];
@@ -33,20 +41,91 @@ const RouteOptimization = () => {
     const [confidence, setConfidence] = useState(94);
     const [rerouting, setRerouting] = useState(false);
 
+    // Route planning inputs
+    const [currentIntersection, setCurrentIntersection] = useState("");
+    const [destination, setDestination] = useState("");
+    const [speedMps, setSpeedMps] = useState("");
+
+    // API state
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState("");
+    const [liveRoute, setLiveRoute] = useState<string[] | null>(null);
+    const [liveEta, setLiveEta] = useState<number | null>(null);
+
     useEffect(() => {
         const t = setInterval(() => {
-            setStep((s) => (s + 1) % baseRoute.length);
-            setEta((e) => Math.max(18, e - 2));
+            // Pause demo animation when live backend data is displayed
+            if (liveRoute === null) {
+                setStep((s) => (s + 1) % baseRoute.length);
+            }
+            if (liveEta === null) {
+                setEta((e) => Math.max(18, e - 2));
+            }
             setConfidence((c) => Math.min(99, c + Math.random()));
 
-            // Simulate rerouting trigger
             if (Math.random() > 0.8) setRerouting(true);
             else setRerouting(false);
 
         }, 2500);
 
         return () => clearInterval(t);
-    }, []);
+    }, [liveRoute, liveEta]);
+
+    const canPredict =
+        currentIntersection !== "" &&
+        destination !== "" &&
+        speedMps !== "" &&
+        Number(speedMps) > 0;
+
+    const handlePredict = async () => {
+        if (!canPredict) return;
+        if (currentIntersection === destination) {
+            setError("Current intersection and destination must be different.");
+            return;
+        }
+
+        setIsLoading(true);
+        setError("");
+
+        try {
+            const response = await fetch(`${BACKEND_BASE_URL}/predict-path`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    current_intersection: currentIntersection,
+                    destination: destination,
+                    speed_mps: Number(speedMps),
+                }),
+            });
+
+            if (!response.ok) {
+                setError(`Route prediction failed (HTTP ${response.status}). Please check your inputs.`);
+                setLiveRoute(null);
+                setLiveEta(null);
+                return;
+            }
+
+            const data = await response.json();
+
+            if (!data.path || typeof data.total_eta_seconds !== "number") {
+                setError("Received invalid response from backend.");
+                return;
+            }
+
+            setLiveRoute(data.path);
+            setLiveEta(data.total_eta_seconds);
+        } catch (err) {
+            setError("Network error. Please ensure the backend is running.");
+            setLiveRoute(null);
+            setLiveEta(null);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // Use live backend data when available, otherwise fall back to demo
+    const displayRoute = liveRoute ?? baseRoute;
+    const displayEta = liveEta ?? eta;
 
     return (
         <div className="p-6 text-white space-y-6">
@@ -59,10 +138,84 @@ const RouteOptimization = () => {
                 </h1>
             </div>
 
+            {/* ROUTE PLANNING CONTROLS */}
+            <div className="bg-black/60 p-5 rounded-xl border border-gray-800">
+                <h2 className="flex items-center gap-2 mb-4">
+                    <Navigation className="text-orange-400" /> Route Planning
+                </h2>
+
+                <div className="grid grid-cols-3 gap-4">
+                    <div>
+                        <label className="block text-sm text-gray-400 mb-1">Current Intersection</label>
+                        <select
+                            value={currentIntersection}
+                            onChange={(e) => setCurrentIntersection(e.target.value)}
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white"
+                        >
+                            <option value="">Select intersection</option>
+                            {GRAPH_NODES.map((node) => (
+                                <option key={node} value={node}>{node}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm text-gray-400 mb-1">Destination</label>
+                        <select
+                            value={destination}
+                            onChange={(e) => setDestination(e.target.value)}
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white"
+                        >
+                            <option value="">Select destination</option>
+                            {GRAPH_NODES.map((node) => (
+                                <option key={node} value={node}>{node}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm text-gray-400 mb-1">Speed (m/s)</label>
+                        <input
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            value={speedMps}
+                            onChange={(e) => setSpeedMps(e.target.value)}
+                            placeholder="e.g. 11"
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white"
+                        />
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-4 mt-4">
+                    <button
+                        onClick={handlePredict}
+                        disabled={!canPredict || isLoading}
+                        className="px-6 py-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-semibold transition"
+                    >
+                        {isLoading ? "Predicting..." : "Predict Route"}
+                    </button>
+
+                    {error && (
+                        <p className="text-sm text-red-400">{error}</p>
+                    )}
+
+                    {liveRoute !== null && !error && (
+                        <p className="text-sm text-green-400">Route from backend</p>
+                    )}
+                </div>
+
+                {!canPredict && !error && (
+                    <p className="text-sm text-yellow-400 mt-3">
+                        Select current intersection, destination, and enter a positive speed to enable route prediction.
+                    </p>
+                )}
+            </div>
+
             {/* TOP METRICS */}
             <div className="grid grid-cols-4 gap-4">
 
-                <Metric title="ETA" value={`${eta}s`} color="text-orange-400" />
+                <Metric title="ETA" value={`${Math.round(displayEta)}s`} color="text-orange-400" />
                 <Metric title="AI Confidence" value={`${confidence.toFixed(1)}%`} color="text-green-400" />
                 <Metric title="Rerouting" value={rerouting ? "TRIGGERED" : "STABLE"} color="text-yellow-400" />
                 <Metric title="System Load" value="OPTIMAL" color="text-blue-400" />
@@ -74,8 +227,8 @@ const RouteOptimization = () => {
 
                 <RouteCard
                     title="AI Optimized Route"
-                    route={baseRoute}
-                    step={step}
+                    route={displayRoute}
+                    step={liveRoute === null ? step : -1}
                     color="orange"
                 />
 

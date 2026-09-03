@@ -6,6 +6,7 @@ from typing import List
 from pydantic import BaseModel
 
 import os
+from datetime import datetime, timezone
 from networkx import NodeNotFound
 
 from traffic_classifier import classify_traffic
@@ -339,6 +340,7 @@ async def driver_live_state():
             "emergency_mode": False,
             "incident_status": "IDLE",
             "advisory": "No active incident. Standing by.",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     incident = list(active_incidents.values())[-1]
@@ -352,14 +354,30 @@ async def driver_live_state():
 
     minutes = round(eta_seconds / 60) if eta_seconds else 0
 
+    # Deterministic demo telemetry derived from incident start_time and path data
+    route_progress = 0.0
+    remaining_eta_seconds = eta_seconds
+    remaining_distance_km = round(total_distance_m / 1000, 2)
+    if eta_seconds > 0 and incident.get("start_time"):
+        try:
+            start_dt = datetime.fromisoformat(incident["start_time"])
+            elapsed = (datetime.now(timezone.utc) - start_dt.astimezone(timezone.utc)).total_seconds()
+            route_progress = min(100.0, max(0.0, (elapsed / eta_seconds) * 100.0))
+            remaining_eta_seconds = max(0.0, eta_seconds - elapsed)
+            remaining_distance_km = round((total_distance_m / 1000) * (1.0 - route_progress / 100.0), 2)
+        except (ValueError, TypeError):
+            pass
+
     return {
         "incident_id": incident["incident_id"],
         "ambulance_id": ambulance_id,
         "hospital_name": destination,
-        "eta_seconds": eta_seconds,
-        "distance_km": round(total_distance_m / 1000, 2),
+        "eta_seconds": round(remaining_eta_seconds, 1),
+        "distance_km": remaining_distance_km,
         "corridor_active": True,
         "emergency_mode": True,
         "incident_status": incident["status"],
         "advisory": f"Green corridor active to {destination}. ETA {minutes} min.",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "route_progress": round(route_progress, 1),
     }

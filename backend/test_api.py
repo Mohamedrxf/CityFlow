@@ -13,6 +13,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from unittest import mock
 
 from fastapi.testclient import TestClient
@@ -254,6 +255,56 @@ class TestDriverLive(unittest.TestCase):
         self.assertFalse(body["corridor_active"])
         self.assertFalse(body["emergency_mode"])
         self.assertEqual(body["incident_status"], "IDLE")
+
+    def test_live_response_contains_timestamp(self):
+        """Backend-generated timestamp must be present and valid ISO-8601 UTC."""
+        r = client.get("/api/driver/live")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertIn("timestamp", body)
+        # Verify parseable as ISO-8601
+        parsed = datetime.fromisoformat(body["timestamp"].replace("Z", "+00:00"))
+        self.assertIsNotNone(parsed)
+
+    def test_live_active_incident_contains_timestamp(self):
+        """Active incident response must also include a valid timestamp."""
+        r = client.post("/start-incident", json={"ambulance_id": "AMB_TS", "destination": "HOSPITAL_A"})
+        self.assertEqual(r.status_code, 200)
+        incident_id = r.json()["incident_id"]
+
+        r = client.get("/api/driver/live")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertIn("timestamp", body)
+        parsed = datetime.fromisoformat(body["timestamp"].replace("Z", "+00:00"))
+        self.assertIsNotNone(parsed)
+
+        # cleanup
+        client.post(f"/close-incident/{incident_id}")
+
+    def test_live_response_contains_route_progress(self):
+        """Active incident response must include deterministic route_progress."""
+        r = client.post("/start-incident", json={"ambulance_id": "AMB_RP", "destination": "HOSPITAL_A"})
+        self.assertEqual(r.status_code, 200)
+        incident_id = r.json()["incident_id"]
+
+        r = client.get("/api/driver/live")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertIn("route_progress", body)
+        self.assertIsInstance(body["route_progress"], (int, float))
+        self.assertGreaterEqual(body["route_progress"], 0.0)
+        self.assertLessEqual(body["route_progress"], 100.0)
+
+        # cleanup
+        client.post(f"/close-incident/{incident_id}")
+
+    def test_live_idle_has_no_route_progress(self):
+        """Idle state must not include route_progress."""
+        r = client.get("/api/driver/live")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertNotIn("route_progress", body)
 
 
 if __name__ == "__main__":
