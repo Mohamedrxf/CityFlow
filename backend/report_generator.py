@@ -1,6 +1,10 @@
 # backend/report_generator.py
 import ollama  # pip install ollama
 import json
+import os
+
+
+OLLAMA_MODEL = os.getenv("CITYFLOW_OLLAMA_MODEL", "llama3:8b")
 
 
 def generate_incident_report(incident: dict) -> str:
@@ -43,7 +47,7 @@ INCIDENT REPORT — {incident.get('incident_id', 'N/A')}
 
     try:
         response = ollama.chat(
-            model="llama3:8b",
+            model=OLLAMA_MODEL,
             messages=[{"role": "user", "content": prompt}]
         )
         return response['message']['content']
