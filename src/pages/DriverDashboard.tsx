@@ -29,6 +29,7 @@ import {
     Activity,
 } from "lucide-react";
 import TopHeader from "@/components/dashboard/TopHeader";
+import { BACKEND_BASE_URL } from "@/lib/apiConfig";
 
 type SignalStatus = "Green" | "Red" | "Preparing";
 
@@ -61,9 +62,6 @@ type BackendPayload = {
     advisory?: string;
     signals?: SignalItem[];
 };
-
-const BACKEND_BASE_URL =
-    (import.meta as any)?.env?.VITE_BACKEND_URL || "http://127.0.0.1:5000";
 
 const initialSignals: SignalItem[] = [
     { id: 1, name: "Signal A12", status: "Green", distance: "250 m", countdown: 18 },
@@ -226,30 +224,14 @@ export default function DriverDashboard() {
 
         const fetchLiveData = async () => {
             try {
-                const endpoints = [
-                    `${BACKEND_BASE_URL}/api/driver/live`,
-                    `${BACKEND_BASE_URL}/driver/live`,
-                    `${BACKEND_BASE_URL}/api/live`,
-                    `${BACKEND_BASE_URL}/status`,
-                ];
-
-                let payload: BackendPayload | null = null;
-
-                for (const endpoint of endpoints) {
-                    try {
-                        const res = await fetch(endpoint, { method: "GET" });
-                        if (res.ok) {
-                            payload = await res.json();
-                            break;
-                        }
-                    } catch {
-                        // continue trying
-                    }
-                }
+                const res = await fetch(`${BACKEND_BASE_URL}/api/driver/live`, {
+                    method: "GET",
+                });
 
                 if (!alive) return;
 
-                if (payload) {
+                if (res.ok) {
+                    const payload: BackendPayload = await res.json();
                     setBackendOnline(true);
 
                     if (typeof payload.etaSeconds === "number") setEtaSecondsTotal(payload.etaSeconds);
@@ -344,7 +326,7 @@ export default function DriverDashboard() {
             }
 
             setTimeout(() => {
-                setAckReceived(success || true);
+                setAckReceived(success);
                 setTimeline((prev) => [
                     {
                         time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
@@ -355,7 +337,7 @@ export default function DriverDashboard() {
                 ]);
             }, 1400);
         } catch {
-            setTimeout(() => setAckReceived(true), 1400);
+            setTimeout(() => setAckReceived(false), 1400);
         }
     };
 

@@ -6,6 +6,7 @@ from typing import List
 from pydantic import BaseModel
 
 import os
+from networkx import NodeNotFound
 
 from traffic_classifier import classify_traffic
 from ambulance_detector import detect_ambulance
@@ -17,12 +18,15 @@ from path_predictor import predict_path_with_eta
 from anomaly_detector import AnomalyDetector
 from incident_logger import create_incident, close_incident, load_incidents
 from report_generator import generate_incident_report
+from city_graph import get_path_distances
 
 app = FastAPI(title="CityFlow Intelligent Traffic Control API")
 
+CORS_ORIGIN = os.getenv("CITYFLOW_CORS_ORIGIN", "http://localhost:8080")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080"],
+    allow_origins=[CORS_ORIGIN],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -203,11 +207,17 @@ async def analyze(
 # ─────────────────────────────────────────────────────────────
 @app.post("/predict-path")
 async def predict_path(req: PathRequest):
-    result = predict_path_with_eta(
-        req.current_intersection,
-        req.destination,
-        req.speed_mps
-    )
+    try:
+        result = predict_path_with_eta(
+            req.current_intersection,
+            req.destination,
+            req.speed_mps
+        )
+    except NodeNotFound:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown intersection: '{req.current_intersection}' or '{req.destination}' is not in the city graph.",
+        )
     return result
 
 
@@ -225,11 +235,38 @@ async def telemetry_ws(websocket: WebSocket, ambulance_id: str):
         while True:
             data = await websocket.receive_json()
 
-            anomalies = detector.push_telemetry(
-                position=data["position"],
-                speed=data["speed"],
-                signal_state=data.get("signal_state")
-            )
+            # Safe extraction — prevent crashes and false anomalies
+            position = str(data.get("position", "UNKNOWN"))
+
+            # Validate speed: must be a valid numeric value
+            # Invalid speed (null, non-numeric string) must NOT become 0.0
+            # because 0.0 is a legitimate stationary-ambulance reading
+            # that would incorrectly trigger a speed_drop anomaly.
+            raw_speed = data.get("speed")
+            speed_valid = True
+            if raw_speed is None:
+                speed_valid = False
+                speed = 0.0
+            else:
+                try:
+                    speed = float(raw_speed)
+                except (TypeError, ValueError):
+                    speed_valid = False
+                    speed = 0.0
+
+            signal_state = data.get("signal_state")
+            if signal_state is not None:
+                signal_state = str(signal_state)
+
+            # Only push valid telemetry to the anomaly detector
+            if speed_valid:
+                anomalies = detector.push_telemetry(
+                    position=position,
+                    speed=speed,
+                    signal_state=signal_state
+                )
+            else:
+                anomalies = []
 
             await websocket.send_json({
                 "ambulance_id": ambulance_id,
@@ -282,3 +319,47 @@ async def generate_report(incident_id: str):
 @app.get("/incidents")
 async def get_all_incidents():
     return load_incidents()
+
+
+# ─────────────────────────────────────────────────────────────
+# Driver Live-State
+# ─────────────────────────────────────────────────────────────
+DEFAULT_DEPARTURE = "INT_01"
+
+
+@app.get("/api/driver/live")
+async def driver_live_state():
+    """Return authoritative driver live-state derived from active incidents
+    and deterministic path/ETA computation. Only fields with a real backend
+    source are included; all others are omitted and keep frontend defaults."""
+
+    if not active_incidents:
+        return {
+            "corridor_active": False,
+            "emergency_mode": False,
+            "incident_status": "IDLE",
+            "advisory": "No active incident. Standing by.",
+        }
+
+    incident = list(active_incidents.values())[-1]
+    ambulance_id = incident["ambulance_id"]
+    destination = incident["destination"]
+
+    path_result = predict_path_with_eta(DEFAULT_DEPARTURE, destination)
+    eta_seconds = path_result.get("total_eta_seconds", 0)
+    path = path_result.get("path", [])
+    total_distance_m = sum(get_path_distances(path)) if path else 0
+
+    minutes = round(eta_seconds / 60) if eta_seconds else 0
+
+    return {
+        "incident_id": incident["incident_id"],
+        "ambulance_id": ambulance_id,
+        "hospital_name": destination,
+        "eta_seconds": eta_seconds,
+        "distance_km": round(total_distance_m / 1000, 2),
+        "corridor_active": True,
+        "emergency_mode": True,
+        "incident_status": incident["status"],
+        "advisory": f"Green corridor active to {destination}. ETA {minutes} min.",
+    }
