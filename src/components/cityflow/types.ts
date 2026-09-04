@@ -13,6 +13,9 @@ export interface VehicleData {
   rotation: number;
   speed: number;
   color: string;
+  startNodeId: string;
+  endNodeId: string;
+  progress: number;
 }
 
 export interface AmbulanceData {
