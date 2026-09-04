@@ -54,8 +54,12 @@ const RouteOptimization = () => {
     const [liveRoute, setLiveRoute] = useState<string[] | null>(null);
     const [liveEta, setLiveEta] = useState<number | null>(null);
 
-    // 3D visualization state (deterministic demo data)
+        // 3D visualization state (deterministic demo data)
     const [show3D, setShow3D] = useState(true);
+
+    // Deterministic demo ambulance progress — advances over time for yielding demo
+    // (not real telemetry; purely a frontend demo simulation)
+    const [ambulanceProgress, setAmbulanceProgress] = useState(0);
 
     // Demo signals for 3D visualization (deterministic initial states)
     const demoSignals: Record<string, SignalState> = useMemo(() => ({
@@ -69,21 +73,21 @@ const RouteOptimization = () => {
         INT_08: "RED",
     }), []);
 
-    // Demo vehicles for 3D visualization
+        // Demo vehicles for 3D visualization (road-aware: each assigned to a valid ROAD_SEGMENT)
     const demoVehicles: VehicleData[] = useMemo(() => [
-        { id: "v1", type: "car", position: { x: -10, y: 0, z: -20 }, rotation: 0, speed: 2, color: "#3a6df0" },
-        { id: "v2", type: "bus", position: { x: 10, y: 0, z: 0 }, rotation: Math.PI / 2, speed: 1.5, color: "#f0a030" },
-        { id: "v3", type: "truck", position: { x: 0, y: 0, z: 10 }, rotation: Math.PI, speed: 1.8, color: "#50a050" },
+        { id: "v1", type: "car", position: { x: -18, y: 0, z: -20 }, rotation: 0, speed: 2, color: "#3a6df0", startNodeId: "INT_01", endNodeId: "INT_02", progress: 0.1 },
+        { id: "v2", type: "bus", position: { x: 6, y: 0, z: 0 }, rotation: Math.PI / 2, speed: 1.5, color: "#f0a030", startNodeId: "INT_05", endNodeId: "INT_06", progress: 0.3 },
+        { id: "v3", type: "truck", position: { x: 0, y: 0, z: -16 }, rotation: Math.PI, speed: 1.8, color: "#50a050", startNodeId: "INT_02", endNodeId: "INT_05", progress: 0.2 },
     ], []);
 
-    // Demo ambulance for 3D visualization
+        // Demo ambulance for 3D visualization
     const demoAmbulance = useMemo(() => ({
         id: "amb-1",
         position: { x: -20, y: 0, z: -20 },
         rotation: 0,
-        progress: 0,
+        progress: ambulanceProgress,
         emergencyActive: true,
-    }), []);
+    }), [ambulanceProgress]);
 
     // Emergency route from live data or demo
     const emergencyRoute = useMemo(() => {
@@ -106,7 +110,13 @@ const RouteOptimization = () => {
             if (liveEta === null) {
                 setEta((e) => Math.max(18, e - 2));
             }
-            setConfidence((c) => Math.min(99, c + Math.random()));
+                        setConfidence((c) => Math.min(99, c + Math.random()));
+
+            // Advance deterministic demo ambulance progress for yielding simulation
+            setAmbulanceProgress((p) => {
+                const next = p + 10;
+                return next >= 100 ? 100 : next;
+            });
 
             if (Math.random() > 0.8) setRerouting(true);
             else setRerouting(false);

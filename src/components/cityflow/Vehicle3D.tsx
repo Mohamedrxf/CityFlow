@@ -1,14 +1,20 @@
 import { useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
-import type { VehicleData } from "./types";
+import { getPositionOnRoad } from "./cityLayout";
+import type { Position3D } from "./types";
 
 interface Vehicle3DProps {
   id: string;
   type: "car" | "bus" | "truck";
-  position: { x: number; y: number; z: number };
-  rotation: number;
+  startNodeId: string;
+  endNodeId: string;
+  progress: number;
   speed: number;
   color: string;
+  position?: Position3D;
+  rotation?: number;
+  ambulancePosition?: Position3D | null;
+  emergencyRouteNodeIds?: string[];
 }
 
 const VEHICLE_DIMENSIONS = {
@@ -17,17 +23,117 @@ const VEHICLE_DIMENSIONS = {
   truck: { width: 1.5, height: 1.2, length: 3.2 },
 };
 
-export function Vehicle3D({ type, position, rotation, speed, color }: Vehicle3DProps) {
+// Distance (in world units) within which a vehicle yields to an approaching ambulance
+const YIELD_DISTANCE_THRESHOLD = 25;
+
+// Checks whether this vehicle's road segment appears as a consecutive pair
+// in the emergency route (in either travel direction)
+function isVehicleOnEmergencyRoute(
+  startNodeId: string,
+  endNodeId: string,
+  routeNodeIds: string[] | undefined
+): boolean {
+  if (!routeNodeIds || routeNodeIds.length < 2) return false;
+  for (let i = 0; i < routeNodeIds.length - 1; i++) {
+    const a = routeNodeIds[i];
+    const b = routeNodeIds[i + 1];
+    if (
+      (a === startNodeId && b === endNodeId) ||
+      (a === endNodeId && b === startNodeId)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function Vehicle3D({
+  type,
+  startNodeId,
+  endNodeId,
+  progress: initialProgress,
+  speed,
+  color,
+  ambulancePosition,
+  emergencyRouteNodeIds,
+}: Vehicle3DProps) {
   const groupRef = useRef<THREE.Group>(null);
+  const currentProgressRef = useRef(Math.min(1, Math.max(0, initialProgress)));
   const dims = VEHICLE_DIMENSIONS[type];
 
-  useFrame((_, delta) => {
-    if (!groupRef.current || speed === 0) return;
+  // Compute segment geometry once from road node positions
+  const segmentInfo = useMemo(() => {
+    const start = getPositionOnRoad(startNodeId, endNodeId, 0);
+    const end = getPositionOnRoad(startNodeId, endNodeId, 1);
+    if (!start || !end) return null;
 
-    // Simple forward movement based on rotation
-    const moveSpeed = speed * delta;
-    groupRef.current.position.x += Math.sin(rotation) * moveSpeed;
-    groupRef.current.position.z += Math.cos(rotation) * moveSpeed;
+    const dx = end.x - start.x;
+    const dz = end.z - start.z;
+    const length = Math.sqrt(dx * dx + dz * dz);
+    const angle = Math.atan2(dx, dz);
+
+    return { start, end, length, angle };
+  }, [startNodeId, endNodeId]);
+
+  if (!segmentInfo) return null;
+
+    // Initial road-based position for first render (before first frame)
+  const initialPos = useMemo(
+    () =>
+      getPositionOnRoad(startNodeId, endNodeId, initialProgress) ??
+      { x: 0, y: 0, z: 0 },
+    [startNodeId, endNodeId, initialProgress]
+  );
+
+    useFrame((_, delta) => {
+    if (!groupRef.current || !segmentInfo) return;
+    if (currentProgressRef.current >= 1) return;
+
+    // Determine effective speed: yield to ambulance if on its route and nearby
+    let effectiveSpeed = speed;
+    if (
+      ambulancePosition &&
+      emergencyRouteNodeIds &&
+      isVehicleOnEmergencyRoute(startNodeId, endNodeId, emergencyRouteNodeIds)
+    ) {
+      const pos = getPositionOnRoad(
+        startNodeId,
+        endNodeId,
+        currentProgressRef.current
+      );
+      if (pos) {
+        const dx = pos.x - ambulancePosition.x;
+        const dz = pos.z - ambulancePosition.z;
+        const distance = Math.sqrt(dx * dx + dz * dz);
+        if (distance < YIELD_DISTANCE_THRESHOLD) {
+          effectiveSpeed = 0;
+        }
+      }
+    }
+
+    if (effectiveSpeed <= 0) return;
+
+    const segmentLength = segmentInfo.length;
+    if (segmentLength > 0) {
+      currentProgressRef.current += (effectiveSpeed * delta) / segmentLength;
+      currentProgressRef.current = Math.min(1, currentProgressRef.current);
+    }
+
+    const pos = getPositionOnRoad(
+      startNodeId,
+      endNodeId,
+      currentProgressRef.current
+    );
+    if (pos) {
+      groupRef.current.position.set(
+        pos.x,
+        pos.y + dims.height / 2,
+        pos.z
+      );
+    }
+
+    // Orient vehicle along road direction (start → end)
+    groupRef.current.rotation.y = segmentInfo.angle;
   });
 
   const bodyColor = useMemo(() => {
@@ -42,8 +148,8 @@ export function Vehicle3D({ type, position, rotation, speed, color }: Vehicle3DP
   return (
     <group
       ref={groupRef}
-      position={[position.x, position.y + dims.height / 2, position.z]}
-      rotation={[0, rotation, 0]}
+      position={[initialPos.x, initialPos.y + dims.height / 2, initialPos.z]}
+      rotation={[0, segmentInfo.angle, 0]}
     >
       {/* Vehicle body */}
       <mesh castShadow>

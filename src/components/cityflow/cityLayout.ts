@@ -72,3 +72,50 @@ export function getPositionOnRoad(
     z: start.z + (end.z - start.z) * progress,
   };
 }
+
+// Get world position along a multi-segment path at progress (0–1)
+export function getPositionOnPath(
+  nodeIds: string[],
+  progress: number
+): Position3D | null {
+  if (nodeIds.length < 2) return null;
+
+  const clamped = Math.min(1, Math.max(0, progress));
+
+  const segments: { start: Position3D; end: Position3D; length: number }[] = [];
+  let totalLength = 0;
+
+  for (let i = 0; i < nodeIds.length - 1; i++) {
+    const start = NODE_POSITIONS[nodeIds[i]];
+    const end = NODE_POSITIONS[nodeIds[i + 1]];
+    if (!start || !end) return null;
+    const dx = end.x - start.x;
+    const dz = end.z - start.z;
+    const length = Math.sqrt(dx * dx + dz * dz);
+    segments.push({ start, end, length });
+    totalLength += length;
+  }
+
+  if (totalLength === 0) return null;
+
+  const targetDistance = clamped * totalLength;
+  let accumulated = 0;
+
+  for (const seg of segments) {
+    if (accumulated + seg.length >= targetDistance) {
+      const localProgress = seg.length > 0
+        ? (targetDistance - accumulated) / seg.length
+        : 0;
+      return {
+        x: seg.start.x + (seg.end.x - seg.start.x) * localProgress,
+        y: 0.1,
+        z: seg.start.z + (seg.end.z - seg.start.z) * localProgress,
+      };
+    }
+    accumulated += seg.length;
+  }
+
+  // At or past the last segment
+  const last = segments[segments.length - 1];
+  return { x: last.end.x, y: 0.1, z: last.end.z };
+}

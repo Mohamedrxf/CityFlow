@@ -1,14 +1,14 @@
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import { Suspense } from "react";
+import { Suspense, useMemo } from "react";
 import { CityRoadNetwork } from "./CityRoadNetwork";
 import { CityIntersection } from "./CityIntersection";
 import { TrafficSignal3D } from "./TrafficSignal3D";
 import { Vehicle3D } from "./Vehicle3D";
 import { Ambulance3D } from "./Ambulance3D";
 import { EmergencyRoute3D } from "./EmergencyRoute3D";
-import { NODE_POSITIONS, ROAD_SEGMENTS } from "./cityLayout";
-import type { SignalState, VehicleData, AmbulanceData, EmergencyRouteData } from "./types";
+import { NODE_POSITIONS, ROAD_SEGMENTS, getPositionOnPath } from "./cityLayout";
+import type { SignalState, VehicleData, AmbulanceData, EmergencyRouteData, Position3D } from "./types";
 
 interface CityFlow3DSceneProps {
   signals?: Record<string, SignalState>;
@@ -25,6 +25,15 @@ export function CityFlow3DScene({
   emergencyRoute,
   emergencyActive = false,
 }: CityFlow3DSceneProps) {
+  // Compute the ambulance's deterministic virtual position along its route
+  // (the visual model remains static; this position is used only for yielding logic)
+  const ambulancePosition: Position3D | null = useMemo(() => {
+    if (!emergencyRoute || !ambulance || emergencyRoute.nodeIds.length < 2) {
+      return null;
+    }
+    return getPositionOnPath(emergencyRoute.nodeIds, ambulance.progress / 100);
+  }, [emergencyRoute, ambulance]);
+
   return (
     <Canvas
       shadows
@@ -71,7 +80,12 @@ export function CityFlow3DScene({
 
         {/* Vehicles */}
         {vehicles.map((vehicle) => (
-          <Vehicle3D key={vehicle.id} {...vehicle} />
+          <Vehicle3D
+            key={vehicle.id}
+            {...vehicle}
+            ambulancePosition={ambulancePosition}
+            emergencyRouteNodeIds={emergencyRoute?.nodeIds}
+          />
         ))}
 
         {/* Ambulance */}
