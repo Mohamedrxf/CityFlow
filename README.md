@@ -1,4 +1,4 @@
-# CityFlow — Intelligent Traffic Control System
+`# CityFlow — Intelligent Traffic Control System
 
 > AI-powered traffic monitoring and emergency vehicle priority system with computer vision and real-time anomaly detection.
 
@@ -491,8 +491,9 @@ Predict ambulance route and ETA.
 
 #### `GET /api/driver/live`
 Get current driver live-state based on active incidents.
-- **Response (active)**: `{"incident_id": "...", "ambulance_id": "AMB-01", "hospital_name": "HOSPITAL_A", "eta_seconds": 140.0, "distance_km": 1.54, "corridor_active": true, "emergency_mode": true, "incident_status": "ACTIVE", "advisory": "..."}`
-- **Response (idle)**: `{"corridor_active": false, "emergency_mode": false, "incident_status": "IDLE", "advisory": "No active incident. Standing by."}`
+- **Response (active)**: `{"incident_id": "...", "ambulance_id": "AMB-01", "hospital_name": "HOSPITAL_A", "eta_seconds": 122.3, "distance_km": 1.35, "corridor_active": true, "emergency_mode": true, "incident_status": "ACTIVE", "advisory": "...", "timestamp": "2025-09-03T12:34:56.789012+00:00", "route_progress": 12.5}`
+- **Response (idle)**: `{"corridor_active": false, "emergency_mode": false, "incident_status": "IDLE", "advisory": "No active incident. Standing by.", "timestamp": "2025-09-03T12:34:56.789012+00:00"}`
+- **Note**: `route_progress` is deterministic demo simulation derived from incident start_time and path ETA. It is labeled "Demo" in the UI.
 
 #### `POST /start-incident`
 Start a new emergency incident.
@@ -549,16 +550,17 @@ The DriverDashboard uses a combination of backend-authoritative data and fronten
 ### Backend-Authoritative / Computed
 - `ambulance_id` — from active incident
 - `hospital_name` — from incident destination
-- `eta_seconds` — computed via path predictor
-- `distance_km` — computed via city graph
+- `eta_seconds` — computed via path predictor (remaining ETA)
+- `distance_km` — computed via city graph (remaining distance)
 - `corridor_active` — derived from active incident state
 - `emergency_mode` — derived from active incident state
 - `advisory` — computed from corridor and ETA
 - `incident_status` — from incident state
+- `timestamp` — backend-generated UTC ISO-8601 response timestamp
+- `route_progress` — deterministic demo simulation derived from incident start_time and path ETA (labeled "Demo" in UI)
 
 ### Not Currently Available from Backend
 The following fields currently use frontend/demo defaults:
-- Route progress
 - Fuel percentage
 - Driver profile
 - Patient priority
@@ -584,15 +586,15 @@ Report generation depends on an available Ollama runtime.
 ```
 venv\Scripts\python.exe -m unittest test_api -v
 ```
-**Current verified count**: 20 tests PASS
+**Current verified count**: 24 tests PASS
 
 Coverage areas:
 - Health check
 - CORS configuration
 - Image analysis (valid, unsupported, traversal, oversized)
-- Path prediction (valid route, unknown nodes)
+- Path prediction (valid route, unknown nodes, invalid speed)
 - Incident lifecycle (create, list, close, report)
-- Driver live state (idle)
+- Driver live state (idle, active, timestamp, route_progress)
 - Telemetry WebSocket (malformed input, type validation, sequential messages, anomaly semantics)
 
 ### Frontend Build

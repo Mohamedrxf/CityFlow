@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
     Navigation,
     TrendingUp,
@@ -17,6 +17,8 @@ import {
     ResponsiveContainer
 } from "recharts";
 import { BACKEND_BASE_URL } from "@/lib/apiConfig";
+import { CityFlow3DScene } from "@/components/cityflow/CityFlow3DScene";
+import type { SignalState, VehicleData } from "@/components/cityflow/types";
 
 // Authoritative graph nodes from backend city_graph.py
 const GRAPH_NODES = [
@@ -51,6 +53,49 @@ const RouteOptimization = () => {
     const [error, setError] = useState("");
     const [liveRoute, setLiveRoute] = useState<string[] | null>(null);
     const [liveEta, setLiveEta] = useState<number | null>(null);
+
+    // 3D visualization state (deterministic demo data)
+    const [show3D, setShow3D] = useState(true);
+
+    // Demo signals for 3D visualization (deterministic initial states)
+    const demoSignals: Record<string, SignalState> = useMemo(() => ({
+        INT_01: "GREEN",
+        INT_02: "RED",
+        INT_03: "GREEN",
+        INT_04: "RED",
+        INT_05: "GREEN",
+        INT_06: "RED",
+        INT_07: "GREEN",
+        INT_08: "RED",
+    }), []);
+
+    // Demo vehicles for 3D visualization
+    const demoVehicles: VehicleData[] = useMemo(() => [
+        { id: "v1", type: "car", position: { x: -10, y: 0, z: -20 }, rotation: 0, speed: 2, color: "#3a6df0" },
+        { id: "v2", type: "bus", position: { x: 10, y: 0, z: 0 }, rotation: Math.PI / 2, speed: 1.5, color: "#f0a030" },
+        { id: "v3", type: "truck", position: { x: 0, y: 0, z: 10 }, rotation: Math.PI, speed: 1.8, color: "#50a050" },
+    ], []);
+
+    // Demo ambulance for 3D visualization
+    const demoAmbulance = useMemo(() => ({
+        id: "amb-1",
+        position: { x: -20, y: 0, z: -20 },
+        rotation: 0,
+        progress: 0,
+        emergencyActive: true,
+    }), []);
+
+    // Emergency route from live data or demo
+    const emergencyRoute = useMemo(() => {
+        if (liveRoute && liveRoute.length > 0) {
+            return { nodeIds: liveRoute, active: true };
+        }
+        // Demo route: INT_01 -> INT_02 -> INT_05 -> INT_08 -> HOSPITAL_A
+        return {
+            nodeIds: ["INT_01", "INT_02", "INT_05", "INT_08", "HOSPITAL_A"],
+            active: true,
+        };
+    }, [liveRoute]);
 
     useEffect(() => {
         const t = setInterval(() => {
@@ -137,6 +182,45 @@ const RouteOptimization = () => {
                     Route Optimization Intelligence
                 </h1>
             </div>
+
+            {/* 3D CityFlow Visualization */}
+            {show3D && (
+                <div className="bg-black/40 rounded-xl border border-gray-800 overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800">
+                        <span className="text-sm text-gray-400">3D City Traffic Visualization</span>
+                        <button
+                            onClick={() => setShow3D(false)}
+                            className="text-xs text-gray-500 hover:text-gray-300 transition"
+                        >
+                            Hide 3D
+                        </button>
+                    </div>
+                    <div className="h-[400px] w-full">
+                        <CityFlow3DScene
+                            signals={demoSignals}
+                            vehicles={demoVehicles}
+                            ambulance={demoAmbulance}
+                            emergencyRoute={emergencyRoute}
+                            emergencyActive={true}
+                        />
+                    </div>
+                    <div className="px-4 py-2 border-t border-gray-800">
+                        <p className="text-xs text-gray-500">
+                            🧪 Demo visualization — Shows fictional city layout with emergency route.
+                            {liveRoute ? " Live route from backend displayed." : " Submit route prediction to see live path."}
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            {!show3D && (
+                <button
+                    onClick={() => setShow3D(true)}
+                    className="text-sm text-blue-400 hover:text-blue-300 transition"
+                >
+                    Show 3D Visualization
+                </button>
+            )}
 
             {/* ROUTE PLANNING CONTROLS */}
             <div className="bg-black/60 p-5 rounded-xl border border-gray-800">
